@@ -167,7 +167,9 @@ def describe_sih(frame: pd.DataFrame) -> str:
     annual = frame.groupby("ano")["internacoes"].sum().sort_index()
     total = int(annual.sum())
     highest_city = (
-        frame.groupby("municipio")["internacoes"].sum().sort_values(ascending=False)
+        frame.groupby(["municipio", "uf"])["internacoes"]
+        .sum()
+        .sort_values(ascending=False)
     )
     if len(annual) > 1:
         first_year, last_year = int(annual.index[0]), int(annual.index[-1])
@@ -183,8 +185,8 @@ def describe_sih(frame: pd.DataFrame) -> str:
     else:
         trend = "Selecione mais de um ano para comparar a tendência."
     city_text = (
-        f"Maior contagem no recorte: {highest_city.index[0]} "
-        f"({int(highest_city.iloc[0]):,} internações)."
+        f"Maior contagem no recorte: {highest_city.index[0][0]} "
+        f"({highest_city.index[0][1]}): {int(highest_city.iloc[0]):,} internações."
         if not highest_city.empty
         else ""
     )

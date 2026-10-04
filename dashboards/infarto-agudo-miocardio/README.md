@@ -1,6 +1,6 @@
 # Painel de Infarto Agudo do Miocárdio
 
-Protótipo educacional para explorar internações e óbitos hospitalares agregados relacionados ao infarto agudo do miocárdio. A aplicação não é ferramenta clínica.
+Protótipo educacional para explorar contagens agregadas de internações e óbitos relacionados ao infarto. A aplicação não é ferramenta clínica.
 
 ## Executar localmente
 
@@ -19,44 +19,53 @@ No Windows, ative o ambiente com:
 .venv\Scripts\Activate.ps1
 ```
 
-## Testar o painel
+## O que o painel oferece
 
-A opção **Demonstração fictícia** abre um conjunto gerado no código, apenas para mostrar os gráficos e filtros. Os números não são estatísticas oficiais nem devem ser citados.
+- Filtros reativos por ano, UF, município, sexo e faixa etária.
+- Indicadores, tendências anuais e comparações interativas com Plotly.
+- Resumo descritivo calculado a partir do recorte filtrado.
+- Aba própria para SIH/SUS e outra para SIM, sem combinar seus numeradores.
+- Download das tabelas filtradas e modelos CSV.
+- Aba com fontes, definições e limitações.
 
-Para usar dados reais, selecione **Enviar CSV agregado** e carregue um arquivo com estas colunas:
+## Usar os dados de demonstração
 
-| Coluna | Conteúdo |
-|---|---|
-| ano | Ano de referência |
-| uf | Sigla do estado |
-| municipio | Município |
-| sexo | Categoria de sexo disponível na base |
-| faixa_etaria | Grupo etário |
-| internacoes | Contagem de internações |
-| obitos_hospitalares | Óbitos hospitalares registrados no mesmo recorte de internações |
+A opção **Demonstração fictícia** gera contagens artificiais de Rondônia para mostrar os filtros e gráficos. Os valores não são estatísticas oficiais e não devem ser citados.
 
-O próprio painel permite baixar um CSV vazio com os nomes esperados. Use somente dados agregados; não carregue microdados com identificadores pessoais.
+## Importar dados agregados
 
-## Fontes oficiais para preparar a primeira base
+Selecione **Enviar arquivos CSV**. O arquivo do SIH/SUS é necessário; o do SIM é opcional e permanece separado. Os dois modelos CSV podem ser baixados na barra lateral.
+
+### Modelo SIH/SUS
+
+Colunas: `ano, uf, municipio, sexo, faixa_etaria, internacoes, obitos_hospitalares`
+
+Use a contagem de internações e de óbitos hospitalares do mesmo recorte. O percentual mostrado é calculado como óbitos hospitalares divididos por internações; ele não representa mortalidade geral da população.
+
+### Modelo SIM
+
+Colunas: `ano, uf, municipio, sexo, faixa_etaria, obitos_sim`
+
+Use a contagem de óbitos por causa básica segundo a consulta do SIM. O painel apresenta essa série separadamente; não divide óbitos do SIM pelas internações do SIH.
+
+Carregue somente dados agregados. Não envie microdados com nomes, CPF, prontuários ou identificadores pessoais.
+
+## Fontes oficiais
 
 - [Morbidade Hospitalar do SUS (SIH/SUS) — DATASUS](https://datasus.saude.gov.br/acesso-a-informacao/morbidade-hospitalar-do-sus-sih-sus/)
 - [Mortalidade desde 1996 pela CID-10 — DATASUS](https://datasus.saude.gov.br/mortalidade-desde-1996-pela-cid-10/)
 - [Informações de Saúde (TabNet) — DATASUS](https://datasus.saude.gov.br/informacoes-de-saude-tabnet/)
 
-Comece com CID-10 I21 e documente os códigos selecionados, o período e se o local representa residência ou ocorrência/internação. Mantenha SIH/SUS e SIM como fontes separadas no arquivo e na interpretação: óbitos hospitalares do SIH não equivalem a todos os óbitos por infarto do SIM. O SIH/SUS não representa todas as internações da rede privada.
+Registre no campo de fonte qual CID-10, período, tipo de localidade (residência ou ocorrência/internação) e versão da consulta foram usados. Comece com CID-10 I21 e documente qualquer ampliação do recorte. O SIH/SUS não representa, por si só, todas as internações da rede privada.
 
-## Indicadores exibidos
+## Referências de design
 
-- Total de internações no recorte selecionado.
-- Óbitos hospitalares registrados no arquivo agregado.
-- Percentual calculado como óbitos hospitalares ÷ internações × 100, somente dentro do mesmo arquivo SIH e dos mesmos filtros.
-- Tendência anual e distribuição de internações por município e faixa etária.
+O protótipo combina padrões de projetos conhecidos sem copiar código: Streamlit para interação simples em Python; Plotly Dash para exploração reativa de gráficos; Superset e Metabase para filtros, indicadores e separação clara das métricas; Evidence para exibir leitura e metodologia junto aos dados.
 
-A versão inicial não calcula taxas por 100 mil habitantes. Isso exigiria denominadores populacionais compatíveis por ano e local, com metodologia documentada.
+A consulta de dados por linguagem natural inspirada no Vanna fica para uma etapa posterior: primeiro é necessário validar as bases, limitar as perguntas a dados agregados e decidir como configurar um provedor de IA com segurança. O repositório Vanna consultado está arquivado, então não é dependência deste protótipo.
 
 ## Próximas melhorias
 
-1. Preparar e validar uma extração real do SIH/SUS para Rondônia e Jaru.
-2. Acrescentar uma seção separada para óbitos do SIM.
-3. Incluir população e taxas após validar os denominadores.
-4. Publicar uma demonstração com aviso visível sobre as fontes e limitações.
+1. Validar arquivos oficiais agregados do SIH/SUS e do SIM para Rondônia/Jaru.
+2. Documentar denominadores e método antes de incluir taxas populacionais.
+3. Acrescentar uma camada opcional de perguntas em linguagem natural somente após validação e configuração segura.

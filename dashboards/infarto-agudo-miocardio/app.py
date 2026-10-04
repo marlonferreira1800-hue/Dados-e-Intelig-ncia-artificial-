@@ -465,9 +465,9 @@ with tab_method:
         """
     )
     st.markdown(
-        "[Morbidade Hospitalar do SUS (SIH/SUS) — DATASUS](https://datasus.saude.gov.br/acesso-a-informacao/morbidade-hospitalar-do-sus-sih-sus/)  
-"
-        "[Mortalidade por CID-10 — DATASUS](https://datasus.saude.gov.br/mortalidade-desde-1996-pela-cid-10/)  
-"
-        "[Informações de Saúde (TabNet) — DATASUS](https://datasus.saude.gov.br/informacoes-de-saude-tabnet/)"
+        "[Morbidade Hospitalar do SUS (SIH/SUS) — DATASUS](https://datasus.saude.gov.br/acesso-a-informacao/morbidade-hospitalar-do-sus-sih-sus/)"
+        + chr(10)
+        + "[Mortalidade por CID-10 — DATASUS](https://datasus.saude.gov.br/mortalidade-desde-1996-pela-cid-10/)"
+        + chr(10)
+        + "[Informações de Saúde (TabNet) — DATASUS](https://datasus.saude.gov.br/informacoes-de-saude-tabnet/)"
     )

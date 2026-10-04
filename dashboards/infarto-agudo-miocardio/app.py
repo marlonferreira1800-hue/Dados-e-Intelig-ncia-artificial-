@@ -12,15 +12,9 @@ st.set_page_config(
     layout="wide",
 )
 
-REQUIRED = [
-    "ano",
-    "uf",
-    "municipio",
-    "sexo",
-    "faixa_etaria",
-    "internacoes",
-    "obitos_hospitalares",
-]
+COMMON_COLUMNS = ["ano", "uf", "municipio", "sexo", "faixa_etaria"]
+SIH_COLUMNS = COMMON_COLUMNS + ["internacoes", "obitos_hospitalares"]
+SIM_COLUMNS = COMMON_COLUMNS + ["obitos_sim"]
 
 ALIASES = {
     "year": "ano",
@@ -28,20 +22,26 @@ ALIASES = {
     "state": "uf",
     "cidade": "municipio",
     "município": "municipio",
+    "faixa etaria": "faixa_etaria",
+    "faixa etária": "faixa_etaria",
+    "internacao": "internacoes",
     "internação": "internacoes",
+    "internacoes": "internacoes",
     "internações": "internacoes",
     "hospitalizacoes": "internacoes",
     "hospitalizações": "internacoes",
     "obitos": "obitos_hospitalares",
     "óbitos": "obitos_hospitalares",
     "mortes_hospitalares": "obitos_hospitalares",
-    "faixa etária": "faixa_etaria",
-    "faixa etaria": "faixa_etaria",
+    "óbitos hospitalares": "obitos_hospitalares",
+    "obitos_sim": "obitos_sim",
+    "óbitos sim": "obitos_sim",
+    "obitos por infarto": "obitos_sim",
 }
 
 
-def demo_data() -> pd.DataFrame:
-    """Valores artificiais para demonstrar o funcionamento do painel."""
+def make_demo_sih() -> pd.DataFrame:
+    """Valores artificiais; servem somente para visualizar as funções do painel."""
     locations = [
         ("RO", "Porto Velho", 1.00),
         ("RO", "Jaru", 0.28),
@@ -52,15 +52,12 @@ def demo_data() -> pd.DataFrame:
     age_groups = [("40–59 anos", 0.34), ("60–79 anos", 0.48), ("80 anos ou mais", 0.18)]
     sexes = [("Feminino", 0.44), ("Masculino", 0.56)]
     rows = []
-
     for year_index, year in enumerate(range(2019, 2025)):
         trend = 1 + year_index * 0.045
-        for uf, city, location_weight in locations:
+        for uf, city, place_weight in locations:
             for age, age_weight in age_groups:
                 for sex, sex_weight in sexes:
-                    admissions = round(
-                        62 * location_weight * trend * age_weight * sex_weight
-                    )
+                    admissions = round(62 * place_weight * trend * age_weight * sex_weight)
                     deaths = round(admissions * (0.09 + 0.015 * age_weight))
                     rows.append(
                         {
@@ -76,7 +73,38 @@ def demo_data() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def load_csv(uploaded_file) -> pd.DataFrame:
+def make_demo_sim() -> pd.DataFrame:
+    """Série fictícia independente para demonstrar a aba do SIM."""
+    locations = [
+        ("RO", "Porto Velho", 1.00),
+        ("RO", "Jaru", 0.28),
+        ("RO", "Ji-Paraná", 0.44),
+        ("RO", "Ariquemes", 0.38),
+        ("RO", "Cacoal", 0.34),
+    ]
+    age_groups = [("40–59 anos", 0.30), ("60–79 anos", 0.48), ("80 anos ou mais", 0.22)]
+    sexes = [("Feminino", 0.44), ("Masculino", 0.56)]
+    rows = []
+    for year_index, year in enumerate(range(2019, 2025)):
+        for uf, city, place_weight in locations:
+            for age, age_weight in age_groups:
+                for sex, sex_weight in sexes:
+                    deaths = round(11 * place_weight * age_weight * sex_weight * (1 + year_index * 0.035))
+                    rows.append(
+                        {
+                            "ano": year,
+                            "uf": uf,
+                            "municipio": city,
+                            "sexo": sex,
+                            "faixa_etaria": age,
+                            "obitos_sim": deaths,
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
+def load_aggregated_csv(uploaded_file, dataset: str) -> pd.DataFrame:
+    required = SIH_COLUMNS if dataset == "SIH/SUS" else SIM_COLUMNS
     raw = uploaded_file.getvalue()
     try:
         frame = pd.read_csv(io.BytesIO(raw), sep=None, engine="python")
@@ -87,237 +115,359 @@ def load_csv(uploaded_file) -> pd.DataFrame:
 
     frame.columns = [str(name).strip().lower() for name in frame.columns]
     frame = frame.rename(columns=ALIASES)
-    missing = [name for name in REQUIRED if name not in frame.columns]
+    missing = [column for column in required if column not in frame.columns]
     if missing:
         raise ValueError(
-            "Colunas obrigatórias ausentes: "
+            f"Arquivo {dataset}: faltam as colunas "
             + ", ".join(missing)
-            + ". Baixe o modelo CSV na barra lateral."
+            + ". Baixe o modelo CSV correspondente na barra lateral."
         )
 
-    frame = frame[REQUIRED].copy()
-    for column in ["ano", "internacoes", "obitos_hospitalares"]:
+    frame = frame[required].copy()
+    count_columns = ["internacoes", "obitos_hospitalares"] if dataset == "SIH/SUS" else ["obitos_sim"]
+    for column in ["ano"] + count_columns:
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-
-    frame = frame.dropna(
-        subset=["ano", "internacoes", "obitos_hospitalares"]
-    )
+    frame = frame.dropna(subset=["ano"] + count_columns)
     if frame.empty:
-        raise ValueError("O arquivo não contém linhas válidas.")
+        raise ValueError(f"Arquivo {dataset}: não há linhas válidas.")
 
-    for column in ["ano", "internacoes", "obitos_hospitalares"]:
+    for column in ["ano"] + count_columns:
         if ((frame[column] % 1) != 0).any():
-            raise ValueError(f"A coluna {column} deve conter números inteiros.")
+            raise ValueError(f"Arquivo {dataset}: a coluna {column} deve conter inteiros.")
         frame[column] = frame[column].astype(int)
 
-    for column in ["uf", "municipio", "sexo", "faixa_etaria"]:
-        frame[column] = (
-            frame[column].fillna("Não informado").astype(str).str.strip()
-        )
+    for column in COMMON_COLUMNS[1:]:
+        frame[column] = frame[column].fillna("Não informado").astype(str).str.strip()
 
-    if (frame[["internacoes", "obitos_hospitalares"]] < 0).any().any():
-        raise ValueError("Internações e óbitos não podem ser negativos.")
-    if (frame["obitos_hospitalares"] > frame["internacoes"]).any():
+    if (frame[count_columns] < 0).any().any():
+        raise ValueError(f"Arquivo {dataset}: contagens não podem ser negativas.")
+    if dataset == "SIH/SUS" and (
+        frame["obitos_hospitalares"] > frame["internacoes"]
+    ).any():
         raise ValueError(
-            "Há linhas com mais óbitos hospitalares do que internações. "
-            "Revise a planilha."
+            "No SIH/SUS, há linhas com óbitos hospitalares acima das internações. "
+            "Revise o arquivo."
         )
     return frame
 
 
-st.title("Infarto Agudo do Miocárdio")
-st.caption("Painel exploratório de internações e óbitos hospitalares agregados")
+def filter_data(frame: pd.DataFrame, years, states, cities, sexes, ages):
+    return frame[
+        frame["ano"].isin(years)
+        & frame["uf"].isin(states)
+        & frame["municipio"].isin(cities)
+        & frame["sexo"].isin(sexes)
+        & frame["faixa_etaria"].isin(ages)
+    ].copy()
 
-st.warning(
-    "A demonstração contém somente valores fictícios para visualizar o painel. "
-    "Não são dados reais do SUS e não devem ser usados em análises ou trabalhos."
+
+def describe_sih(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "Nenhum registro corresponde aos filtros selecionados."
+    annual = frame.groupby("ano")["internacoes"].sum().sort_index()
+    total = int(annual.sum())
+    highest_city = (
+        frame.groupby("municipio")["internacoes"].sum().sort_values(ascending=False)
+    )
+    if len(annual) > 1:
+        first_year, last_year = int(annual.index[0]), int(annual.index[-1])
+        first_value, last_value = int(annual.iloc[0]), int(annual.iloc[-1])
+        if first_value:
+            change = (last_value / first_value - 1) * 100
+            trend = (
+                f"Entre {first_year} e {last_year}, as internações passaram de "
+                f"{first_value:,} para {last_value:,} ({change:+.1f}%)."
+            )
+        else:
+            trend = f"Há dados para {len(annual)} anos no período selecionado."
+    else:
+        trend = "Selecione mais de um ano para comparar a tendência."
+    city_text = (
+        f"Maior contagem no recorte: {highest_city.index[0]} "
+        f"({int(highest_city.iloc[0]):,} internações)."
+        if not highest_city.empty
+        else ""
+    )
+    return f"{trend} Total no recorte: {total:,}. {city_text}"
+
+
+st.title("Infarto Agudo do Miocárdio")
+st.caption("Painel exploratório de internações e mortalidade agregadas")
+
+st.info(
+    "Demonstração fictícia: os números de exemplo são simulados, não representam "
+    "dados oficiais e não devem ser citados."
 )
 
 with st.sidebar:
-    st.header("Fonte dos dados")
-    mode = st.radio(
-        "Escolha uma opção",
-        ["Demonstração fictícia", "Enviar CSV agregado"],
+    st.header("Dados")
+    data_mode = st.radio(
+        "Origem",
+        ["Demonstração fictícia", "Enviar arquivos CSV"],
     )
-    uploaded = None
-    source_note = "Demonstração fictícia — valores simulados"
+    sih_file = sim_file = None
+    sih_source = "Demonstração fictícia — valores simulados"
+    sim_source = "Demonstração fictícia — valores simulados"
 
-    if mode == "Enviar CSV agregado":
-        uploaded = st.file_uploader("Selecione um arquivo CSV", type=["csv"])
-        source_note = st.text_input(
-            "Fonte e observação",
-            value="DATASUS / TabNet — informe a base e os filtros usados",
+    if data_mode == "Enviar arquivos CSV":
+        sih_file = st.file_uploader("SIH/SUS — internações agregadas", type=["csv"])
+        sim_file = st.file_uploader("SIM — óbitos agregados (opcional)", type=["csv"])
+        sih_source = st.text_input(
+            "Fonte SIH e recorte",
+            value="DATASUS/TabNet — informe CID, período e local consultado",
         )
-
-    template = pd.DataFrame(columns=REQUIRED).to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Baixar modelo CSV",
-        template,
-        file_name="modelo_infarto.csv",
-        mime="text/csv",
-    )
+        if sim_file:
+            sim_source = st.text_input(
+                "Fonte SIM e recorte",
+                value="DATASUS/TabNet — informe causa, período e local consultado",
+            )
+        st.download_button(
+            "Modelo CSV SIH/SUS",
+            pd.DataFrame(columns=SIH_COLUMNS).to_csv(index=False).encode("utf-8"),
+            file_name="modelo_sih_infarto.csv",
+            mime="text/csv",
+        )
+        st.download_button(
+            "Modelo CSV SIM",
+            pd.DataFrame(columns=SIM_COLUMNS).to_csv(index=False).encode("utf-8"),
+            file_name="modelo_sim_infarto.csv",
+            mime="text/csv",
+        )
     st.divider()
     st.caption(
-        "Use dados agregados. Não envie nomes, CPF, prontuários ou identificadores "
-        "de pacientes."
+        "Envie apenas dados agregados. Não carregue nomes, CPF, prontuários ou "
+        "identificadores de pacientes."
     )
 
-if mode == "Demonstração fictícia":
-    data = demo_data()
+if data_mode == "Demonstração fictícia":
+    sih = make_demo_sih()
+    sim = make_demo_sim()
 else:
-    if uploaded is None:
-        st.info("Envie um CSV agregado para começar.")
-        st.write("Colunas esperadas:", ", ".join(REQUIRED))
+    if sih_file is None:
+        st.warning("Envie um CSV agregado do SIH/SUS para abrir o painel.")
         st.stop()
     try:
-        data = load_csv(uploaded)
+        sih = load_aggregated_csv(sih_file, "SIH/SUS")
+        sim = load_aggregated_csv(sim_file, "SIM") if sim_file else None
     except Exception as error:
         st.error(str(error))
         st.stop()
 
 with st.sidebar:
     st.header("Filtros")
-    years = sorted(data["ano"].unique())
-    if len(years) == 1:
-        year_range = (years[0], years[0])
-        st.write(f"Ano: {years[0]}")
-    else:
-        year_range = st.select_slider(
-            "Período",
-            options=years,
-            value=(years[0], years[-1]),
-        )
-
-    states = sorted(data["uf"].unique())
-    selected_states = st.multiselect("UF", states, default=states)
-    available_cities = sorted(
-        data.loc[data["uf"].isin(selected_states), "municipio"].unique()
+    years_available = sorted(sih["ano"].unique())
+    selected_years = st.multiselect(
+        "Ano",
+        years_available,
+        default=years_available,
+    )
+    states_available = sorted(sih["uf"].unique())
+    selected_states = st.multiselect(
+        "UF",
+        states_available,
+        default=states_available,
+    )
+    cities_available = sorted(
+        sih.loc[sih["uf"].isin(selected_states), "municipio"].unique()
     )
     selected_cities = st.multiselect(
-        "Município", available_cities, default=available_cities
+        "Município",
+        cities_available,
+        default=cities_available,
     )
-    sexes = sorted(data["sexo"].unique())
-    selected_sexes = st.multiselect("Sexo", sexes, default=sexes)
-    ages = sorted(data["faixa_etaria"].unique())
-    selected_ages = st.multiselect("Faixa etária", ages, default=ages)
+    sexes_available = sorted(sih["sexo"].unique())
+    selected_sexes = st.multiselect(
+        "Sexo",
+        sexes_available,
+        default=sexes_available,
+    )
+    ages_available = sorted(sih["faixa_etaria"].unique())
+    selected_ages = st.multiselect(
+        "Faixa etária",
+        ages_available,
+        default=ages_available,
+    )
 
-filtered = data[
-    data["ano"].between(year_range[0], year_range[1])
-    & data["uf"].isin(selected_states)
-    & data["municipio"].isin(selected_cities)
-    & data["sexo"].isin(selected_sexes)
-    & data["faixa_etaria"].isin(selected_ages)
-].copy()
-
-st.caption(f"Fonte informada: {source_note}")
-if filtered.empty:
-    st.info("Nenhum registro corresponde aos filtros selecionados.")
-    st.stop()
-
-admissions = int(filtered["internacoes"].sum())
-hospital_deaths = int(filtered["obitos_hospitalares"].sum())
-hospital_percent = hospital_deaths / admissions * 100 if admissions else 0
-
-st.caption(
-    f"Período: {year_range[0]}–{year_range[1]} · "
-    f"Registros agregados: {len(filtered):,}"
+selected_sih = filter_data(
+    sih, selected_years, selected_states, selected_cities, selected_sexes, selected_ages
 )
-k1, k2, k3 = st.columns(3)
-k1.metric("Internações registradas", f"{admissions:,}")
-k2.metric("Óbitos hospitalares no SIH", f"{hospital_deaths:,}")
-k3.metric("Óbitos hospitalares / internações", f"{hospital_percent:.1f}%")
-st.caption(
-    "O percentual usa internações e óbitos hospitalares do mesmo arquivo filtrado. "
-    "Não representa mortalidade geral da população."
+selected_sim = (
+    filter_data(sim, selected_years, selected_states, selected_cities, selected_sexes, selected_ages)
+    if sim is not None
+    else None
 )
 
-st.subheader("Evolução anual")
-annual = (
-    filtered.groupby("ano", as_index=False)[
-        ["internacoes", "obitos_hospitalares"]
-    ]
-    .sum()
-    .sort_values("ano")
-)
-left, right = st.columns(2)
-with left:
-    chart = px.line(
-        annual,
-        x="ano",
-        y="internacoes",
-        markers=True,
-        title="Internações",
-        labels={"ano": "Ano", "internacoes": "Internações"},
-    )
-    st.plotly_chart(chart, use_container_width=True)
-with right:
-    chart = px.line(
-        annual,
-        x="ano",
-        y="obitos_hospitalares",
-        markers=True,
-        title="Óbitos hospitalares",
-        labels={"ano": "Ano", "obitos_hospitalares": "Óbitos"},
-    )
-    st.plotly_chart(chart, use_container_width=True)
-
-st.subheader("Distribuição por local e faixa etária")
-left, right = st.columns(2)
-with left:
-    by_city = (
-        filtered.groupby(["municipio", "uf"], as_index=False)["internacoes"]
-        .sum()
-        .sort_values("internacoes", ascending=False)
-        .head(12)
-    )
-    by_city["local"] = by_city["municipio"] + " (" + by_city["uf"] + ")"
-    chart = px.bar(
-        by_city.sort_values("internacoes"),
-        x="internacoes",
-        y="local",
-        orientation="h",
-        title="Internações por município",
-        labels={"internacoes": "Internações", "local": ""},
-    )
-    st.plotly_chart(chart, use_container_width=True)
-with right:
-    by_age = (
-        filtered.groupby("faixa_etaria", as_index=False)["internacoes"]
-        .sum()
-        .sort_values("internacoes", ascending=False)
-    )
-    chart = px.bar(
-        by_age,
-        x="faixa_etaria",
-        y="internacoes",
-        title="Internações por faixa etária",
-        labels={"faixa_etaria": "Faixa etária", "internacoes": "Internações"},
-    )
-    st.plotly_chart(chart, use_container_width=True)
-
-st.subheader("Tabela filtrada")
-st.dataframe(
-    filtered.sort_values(["ano", "uf", "municipio"]),
-    use_container_width=True,
-    hide_index=True,
-)
-st.download_button(
-    "Baixar dados filtrados",
-    filtered.to_csv(index=False).encode("utf-8"),
-    file_name="infarto_dados_filtrados.csv",
-    mime="text/csv",
+tab_overview, tab_mortality, tab_method = st.tabs(
+    ["Visão geral — SIH/SUS", "Mortalidade — SIM", "Dados e metodologia"]
 )
 
-with st.expander("Fontes, definições e limitações"):
+with tab_overview:
+    st.subheader("Internações e óbitos hospitalares")
+    st.caption(f"Fonte declarada: {sih_source}")
+    if selected_sih.empty:
+        st.info("Nenhum registro do SIH/SUS corresponde aos filtros.")
+    else:
+        admissions_total = int(selected_sih["internacoes"].sum())
+        hospital_deaths_total = int(selected_sih["obitos_hospitalares"].sum())
+        hospital_share = (
+            hospital_deaths_total / admissions_total * 100 if admissions_total else 0
+        )
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Internações registradas", f"{admissions_total:,}")
+        k2.metric("Óbitos hospitalares", f"{hospital_deaths_total:,}")
+        k3.metric("Óbitos hospitalares / internações", f"{hospital_share:.1f}%")
+        st.caption(
+            "Esse percentual usa apenas contagens do SIH/SUS no mesmo recorte; "
+            "não é mortalidade geral da população."
+        )
+
+        st.markdown("#### Leitura automática do recorte")
+        st.write(describe_sih(selected_sih))
+
+        annual = (
+            selected_sih.groupby("ano", as_index=False)[
+                ["internacoes", "obitos_hospitalares"]
+            ]
+            .sum()
+            .sort_values("ano")
+        )
+        left, right = st.columns(2)
+        with left:
+            fig = px.line(
+                annual,
+                x="ano",
+                y="internacoes",
+                markers=True,
+                title="Internações por ano",
+                labels={"ano": "Ano", "internacoes": "Internações"},
+            )
+            fig.update_layout(margin=dict(l=10, r=10, t=45, b=10), hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
+        with right:
+            fig = px.line(
+                annual,
+                x="ano",
+                y="obitos_hospitalares",
+                markers=True,
+                title="Óbitos hospitalares por ano",
+                labels={"ano": "Ano", "obitos_hospitalares": "Óbitos"},
+            )
+            fig.update_layout(margin=dict(l=10, r=10, t=45, b=10), hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
+
+        left, right = st.columns(2)
+        with left:
+            by_city = (
+                selected_sih.groupby(["municipio", "uf"], as_index=False)["internacoes"]
+                .sum()
+                .sort_values("internacoes", ascending=False)
+                .head(12)
+            )
+            by_city["local"] = by_city["municipio"] + " (" + by_city["uf"] + ")"
+            fig = px.bar(
+                by_city.sort_values("internacoes"),
+                x="internacoes",
+                y="local",
+                orientation="h",
+                title="Internações por município",
+                labels={"internacoes": "Internações", "local": ""},
+            )
+            fig.update_layout(margin=dict(l=10, r=10, t=45, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+        with right:
+            by_age = (
+                selected_sih.groupby("faixa_etaria", as_index=False)["internacoes"]
+                .sum()
+                .sort_values("internacoes", ascending=False)
+            )
+            fig = px.bar(
+                by_age,
+                x="faixa_etaria",
+                y="internacoes",
+                title="Internações por faixa etária",
+                labels={"faixa_etaria": "Faixa etária", "internacoes": "Internações"},
+            )
+            fig.update_layout(margin=dict(l=10, r=10, t=45, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Ver tabela agregada SIH/SUS"):
+            st.dataframe(
+                selected_sih.sort_values(["ano", "uf", "municipio"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.download_button(
+            "Baixar recorte SIH/SUS",
+            selected_sih.to_csv(index=False).encode("utf-8"),
+            file_name="sih_infarto_filtrado.csv",
+            mime="text/csv",
+        )
+
+with tab_mortality:
+    st.subheader("Óbitos por causa básica — SIM")
+    if selected_sim is None:
+        st.info(
+            "Envie também um CSV agregado do SIM para explorar óbitos por causa básica. "
+            "Essa fonte fica separada do SIH/SUS."
+        )
+    elif selected_sim.empty:
+        st.info("Nenhum registro do SIM corresponde aos filtros.")
+    else:
+        st.caption(f"Fonte declarada: {sim_source}")
+        deaths_total = int(selected_sim["obitos_sim"].sum())
+        st.metric("Óbitos registrados no SIM", f"{deaths_total:,}")
+        annual_sim = (
+            selected_sim.groupby("ano", as_index=False)["obitos_sim"]
+            .sum()
+            .sort_values("ano")
+        )
+        fig = px.line(
+            annual_sim,
+            x="ano",
+            y="obitos_sim",
+            markers=True,
+            title="Óbitos por ano — SIM",
+            labels={"ano": "Ano", "obitos_sim": "Óbitos"},
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=45, b=10), hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
+        with st.expander("Ver tabela agregada SIM"):
+            st.dataframe(
+                selected_sim.sort_values(["ano", "uf", "municipio"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.download_button(
+            "Baixar recorte SIM",
+            selected_sim.to_csv(index=False).encode("utf-8"),
+            file_name="sim_infarto_filtrado.csv",
+            mime="text/csv",
+        )
+        st.warning(
+            "Não divida os óbitos do SIM pelas internações do SIH/SUS para calcular "
+            "letalidade hospitalar: são bases e universos diferentes."
+        )
+
+with tab_method:
+    st.subheader("Definições e limites")
     st.markdown(
         """
-- Este protótipo não faz diagnóstico nem recomenda tratamento.
-- O SIH/SUS descreve internações registradas no sistema; não representa, sozinho,
-  todas as internações da rede privada nem todas as pessoas com infarto.
-- Óbitos hospitalares do SIH e óbitos por causa básica do SIM são medidas distintas.
-  Mantenha cada fonte separada e informe os filtros usados.
-- Não calcule taxas populacionais sem denominadores populacionais compatíveis.
-- Antes de divulgar resultados, confira CID-10, período, local de residência ou
-  internação e a versão da base consultada.
+- O protótipo foi pensado para consultas agregadas sobre infarto agudo do miocárdio.
+  Documente os códigos CID-10 selecionados na extração e mantenha o mesmo recorte
+  temporal e geográfico em cada análise.
+- SIH/SUS: internações e óbitos hospitalares informados na base de internações.
+  A cobertura não equivale a todas as internações da rede privada.
+- SIM: óbitos registrados por causa básica. A contagem é mostrada separadamente.
+- O painel não calcula taxa populacional. Para isso, são necessários denominadores
+  populacionais compatíveis por ano e local.
+- Os dados de demonstração são gerados artificialmente e não são estatísticas reais.
+- Não é uma ferramenta diagnóstica ou de decisão clínica.
         """
+    )
+    st.markdown(
+        "[Morbidade Hospitalar do SUS (SIH/SUS) — DATASUS](https://datasus.saude.gov.br/acesso-a-informacao/morbidade-hospitalar-do-sus-sih-sus/)  
+"
+        "[Mortalidade por CID-10 — DATASUS](https://datasus.saude.gov.br/mortalidade-desde-1996-pela-cid-10/)  
+"
+        "[Informações de Saúde (TabNet) — DATASUS](https://datasus.saude.gov.br/informacoes-de-saude-tabnet/)"
     )
